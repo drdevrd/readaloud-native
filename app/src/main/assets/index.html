@@ -274,7 +274,7 @@ textarea:focus{border-color:var(--ac);}textarea::placeholder{color:var(--t2);}
 </div><!-- end reader page -->
 
 <!-- ══════════════ BROWSER PAGE ══════════════ -->
-<div class="app-page" id="page-browser" style="height:100vh;display:none;flex-direction:column;">
+<div class="app-page" id="page-browser">
   <!-- Address bar -->
   <div class="browser-topbar" style="flex-shrink:0;">
     <div class="addr-wrap" style="flex:1;">
@@ -311,7 +311,7 @@ textarea:focus{border-color:var(--ac);}textarea::placeholder{color:var(--t2);}
   </div>
   <!-- Real WebView iframe -->
   <iframe id="webview"
-    style="display:none;flex:1;width:100%;border:none;"
+    style="display:none;width:100%;border:none;flex:1;min-height:0;"
     sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-top-navigation allow-top-navigation-by-user-activation"
     allow="autoplay; fullscreen">
   </iframe>
@@ -347,7 +347,10 @@ function switchPage(p){
   document.getElementById('page-'+p).className='app-page active';
   document.querySelectorAll('.bnav-btn').forEach(el=>el.className='bnav-btn');
   document.getElementById('bnav-'+p).className='bnav-btn on';
-  if(p==='reader')checkBrowserExtract();
+  if(p==='browser'){
+    const bp=document.getElementById('page-browser');
+    bp.style.height='100vh';bp.style.overflow='hidden';
+  }
 }
 
 /* ── REAL IFRAME BROWSER ── */
