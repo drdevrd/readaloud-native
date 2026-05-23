@@ -877,8 +877,16 @@ async function playElChunk(idx){
   }catch(e){ss('Error: '+e.message);playing=false;resetUI();}
 }
 function playDev(){
+  // Use native Android TTS if available
+  if(window.AndroidBridge){
+    playing=true;paused=false;setPlayUI();
+    playNativeChunk(ci);
+    return;
+  }
+  // Fallback: browser SpeechSynthesis
+  if(!window.speechSynthesis){ss('⚠️ No voice available. Use ElevenLabs tab.');resetUI();return;}
   playing=true;paused=false;setPlayUI();SY.cancel();
-  const voice=getDevVoice(),lang=selDevLang||'en-GB';
+  const voice=getDevVoice(),lang=selDevLang||'en-US';
   chunks.slice(ci).forEach((text,idx)=>{
     const i=ci+idx;const u=new SpeechSynthesisUtterance(text);
     if(voice){u.voice=voice;u.lang=voice.lang;}else{u.lang=lang;}
@@ -889,14 +897,67 @@ function playDev(){
     SY.speak(u);
   });
 }
+
+// Native Android TTS
+let nativeCi=0;
+function playNativeChunk(idx){
+  if(idx>=chunks.length||!playing){if(idx>=chunks.length)finishPlay();return;}
+  ci=idx;savePos();updateProg();
+  ss('▶ Native TTS · '+(idx+1)+'/'+chunks.length);
+  const voice=selDevName||'';
+  window.AndroidBridge.speakText(chunks[idx], voice, spd, pitch);
+}
+// Called by MainActivity when TTS finishes a chunk
+function onNativeTTSDone(){
+  if(playing&&!paused) playNativeChunk(ci+1);
+}
+function onNativeTTSError(){
+  ss('TTS Error — try ElevenLabs');playing=false;resetUI();
+}
+// Called by MainActivity when voices are ready
+function onNativeVoicesReady(voices){
+  if(!voices||!voices.length) return;
+  allDevVoices=voices.map(v=>({name:v.name,lang:v.lang}));
+  const list=document.getElementById('dvlist');list.innerHTML='';
+  voices.forEach(v=>{
+    const row=document.createElement('div');
+    row.className='dvbtn'+(selDevName===v.name?' on':'');
+    row.innerHTML='<div style="flex:1;cursor:pointer"><div class="dn">'+v.name+'</div><div class="dl">'+v.lang+'</div></div>';
+    row.onclick=()=>{
+      selDevName=v.name;selDevLang=v.lang;
+      document.querySelectorAll('.dvbtn').forEach(el=>el.className='dvbtn');
+      row.className='dvbtn on';
+      document.getElementById('dav').textContent='✓ '+v.name;
+    };
+    list.appendChild(row);
+  });
+  // Auto-select first English voice
+  const en=voices.find(v=>v.lang.startsWith('en'))||voices[0];
+  if(en){selDevName=en.name;selDevLang=en.lang;document.getElementById('dav').textContent='✓ '+en.name;}
+}
 function setPlayUI(){document.getElementById('pi').textContent='■';document.getElementById('pl').textContent=' Stop';['pauseBtn','backBtn','skipBtn'].forEach(id=>document.getElementById(id).disabled=false);}
 function doPause(){
   if(!playing)return;
   const isAi=engine==='ms'||engine==='ai';
-  if(isAi){if(paused){mainAudio.play();paused=false;document.getElementById('pai').textContent='⏸';document.getElementById('pal').textContent=' Pause';}else{mainAudio.pause();paused=true;document.getElementById('pai').textContent='▶';document.getElementById('pal').textContent=' Resume';ss('Paused.');}}
-  else{if(paused){SY.resume();paused=false;document.getElementById('pai').textContent='⏸';document.getElementById('pal').textContent=' Pause';}else{SY.pause();paused=true;document.getElementById('pai').textContent='▶';document.getElementById('pal').textContent=' Resume';ss('Paused.');}}
+  if(isAi){
+    if(paused){mainAudio.play();paused=false;document.getElementById('pai').textContent='⏸';document.getElementById('pal').textContent=' Pause';}
+    else{mainAudio.pause();paused=true;document.getElementById('pai').textContent='▶';document.getElementById('pal').textContent=' Resume';ss('Paused.');}
+  } else {
+    if(window.AndroidBridge){
+      if(paused){paused=false;document.getElementById('pai').textContent='⏸';document.getElementById('pal').textContent=' Pause';playNativeChunk(ci);}
+      else{paused=true;window.AndroidBridge.stopSpeaking();document.getElementById('pai').textContent='▶';document.getElementById('pal').textContent=' Resume';ss('Paused.');}
+    } else {
+      if(paused){SY.resume();paused=false;document.getElementById('pai').textContent='⏸';document.getElementById('pal').textContent=' Pause';}
+      else{SY.pause();paused=true;document.getElementById('pai').textContent='▶';document.getElementById('pal').textContent=' Resume';ss('Paused.');}
+    }
+  }
 }
-function stopAll(){mainAudio.pause();mainAudio.src='';SY.cancel();playing=false;paused=false;savePos();resetUI();}
+function stopAll(){
+  mainAudio.pause();mainAudio.src='';
+  if(window.AndroidBridge)window.AndroidBridge.stopSpeaking();
+  else if(window.speechSynthesis)SY.cancel();
+  playing=false;paused=false;savePos();resetUI();
+}
 function seekChunks(n){const was=playing;stopAll();ci=Math.max(0,Math.min(chunks.length-1,ci+n));updateProg();if(was){playing=false;togglePlay();}else ss('Section '+(ci+1)+'/'+chunks.length);}
 function seekBar(e){if(!chunks.length)return;const rect=e.currentTarget.getBoundingClientRect(),pct=(e.clientX-rect.left)/rect.width;const was=playing;stopAll();ci=Math.max(0,Math.min(chunks.length-1,Math.round(pct*chunks.length)));updateProg();if(was){playing=false;togglePlay();}}
 function updateProg(){
@@ -942,20 +1003,23 @@ async function downloadAudio(){
   }
   if(!blobs.length){btn.disabled=false;btn.innerHTML='⬇ Download Full Audio (MP3)';ss('Download failed');return;}
   const merged=new Blob(blobs,{type:'audio/mpeg'});
-  const url=URL.createObjectURL(merged);
-  // Android WebView compatible download
-  const a=document.createElement('a');
-  a.href=url;
-  a.download='readaloud_'+(new Date().toISOString().slice(0,10))+'.mp3';
-  a.style.display='none';
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  // Fallback: open in new tab for Android
-  setTimeout(()=>{
-    try{window.open(url,'_blank');}catch(e){}
-    setTimeout(()=>URL.revokeObjectURL(url),30000);
-  },1000);
+  const filename='readaloud_'+(new Date().toISOString().slice(0,10))+'.mp3';
+  // Android native save via AndroidBridge
+  if(window.AndroidBridge){
+    const reader=new FileReader();
+    reader.onload=()=>{
+      const base64=reader.result.split(',')[1];
+      window.AndroidBridge.saveAudioFile(base64, filename);
+    };
+    reader.readAsDataURL(merged);
+  } else {
+    // Web browser download
+    const url=URL.createObjectURL(merged);
+    const a=document.createElement('a');
+    a.href=url;a.download=filename;a.style.display='none';
+    document.body.appendChild(a);a.click();document.body.removeChild(a);
+    setTimeout(()=>URL.revokeObjectURL(url),5000);
+  }
   btn.disabled=false;btn.innerHTML='⬇ Download Full Audio (MP3)';
   ss('✓ Audio ready — check Downloads or Files app');
 }
