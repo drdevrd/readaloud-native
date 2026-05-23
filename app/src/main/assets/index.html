@@ -365,6 +365,12 @@ function brNavigate(){
 }
 function brLoad(url){
   document.getElementById('addrBar').value=url;
+  // Use native Android browser if available — opens real browser activity
+  if(window.AndroidBridge){
+    window.AndroidBridge.openBrowser(url);
+    return;
+  }
+  // Fallback: iframe for web/PC
   document.getElementById('brHome').style.display='none';
   const wv=document.getElementById('webview');
   wv.style.display='block';
@@ -924,11 +930,21 @@ async function downloadAudio(){
   if(!blobs.length){btn.disabled=false;btn.innerHTML='⬇ Download Full Audio (MP3)';ss('Download failed');return;}
   const merged=new Blob(blobs,{type:'audio/mpeg'});
   const url=URL.createObjectURL(merged);
-  const a=document.createElement('a');a.href=url;a.download='readaloud_'+(new Date().toISOString().slice(0,10))+'.mp3';
-  document.body.appendChild(a);a.click();document.body.removeChild(a);
-  setTimeout(()=>URL.revokeObjectURL(url),5000);
+  // Android WebView compatible download
+  const a=document.createElement('a');
+  a.href=url;
+  a.download='readaloud_'+(new Date().toISOString().slice(0,10))+'.mp3';
+  a.style.display='none';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  // Fallback: open in new tab for Android
+  setTimeout(()=>{
+    try{window.open(url,'_blank');}catch(e){}
+    setTimeout(()=>URL.revokeObjectURL(url),30000);
+  },1000);
   btn.disabled=false;btn.innerHTML='⬇ Download Full Audio (MP3)';
-  ss('✓ Downloaded — check your Downloads folder');
+  ss('✓ Audio ready — check Downloads or Files app');
 }
 
 /* ── TOAST ── */
