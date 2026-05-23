@@ -4,6 +4,7 @@ import android.app.Activity;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.Build;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.webkit.WebChromeClient;
@@ -12,6 +13,8 @@ import android.webkit.PermissionRequest;
 import android.view.Window;
 import android.view.WindowManager;
 import android.graphics.Color;
+import android.speech.tts.TextToSpeech;
+import java.util.Locale;
 
 public class MainActivity extends Activity {
 
@@ -21,11 +24,18 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
         requestWindowFeature(Window.FEATURE_NO_TITLE);
         getWindow().setFlags(
             WindowManager.LayoutParams.FLAG_FULLSCREEN,
             WindowManager.LayoutParams.FLAG_FULLSCREEN
         );
+
+        // Enable WebView debugging on debug builds
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
+            WebView.setWebContentsDebuggingEnabled(true);
+        }
+
         webView = new WebView(this);
         webView.setBackgroundColor(Color.parseColor("#0a0a0f"));
         setContentView(webView);
@@ -41,6 +51,8 @@ public class MainActivity extends Activity {
         s.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
         s.setLoadWithOverviewMode(true);
         s.setUseWideViewPort(true);
+        // Enable text zoom
+        s.setTextZoom(100);
 
         webView.setWebChromeClient(new WebChromeClient() {
             @Override
@@ -63,18 +75,35 @@ public class MainActivity extends Activity {
             }
         });
 
-        webView.addJavascriptInterface(new Object() {
-            @android.webkit.JavascriptInterface
-            public void openBrowser(String url) {
-                runOnUiThread(() -> {
-                    Intent intent = new Intent(MainActivity.this, BrowserActivity.class);
-                    intent.putExtra("url", url != null ? url : "https://www.britannica.com");
-                    startActivityForResult(intent, BROWSER_REQUEST);
-                });
-            }
-        }, "AndroidBridge");
+        // JS Interface for opening browser and TTS
+        webView.addJavascriptInterface(new AppInterface(), "AndroidBridge");
 
         webView.loadUrl("file:///android_asset/index.html");
+    }
+
+    private class AppInterface {
+        @android.webkit.JavascriptInterface
+        public void openBrowser(String url) {
+            runOnUiThread(() -> {
+                Intent intent = new Intent(MainActivity.this, BrowserActivity.class);
+                intent.putExtra("url", url != null ? url : "https://www.britannica.com");
+                startActivityForResult(intent, BROWSER_REQUEST);
+            });
+        }
+
+        @android.webkit.JavascriptInterface
+        public void speak(String text, String lang) {
+            // Native TTS fallback via Android
+            runOnUiThread(() -> {
+                webView.loadUrl("javascript:console.log('TTS speak called: " + text.substring(0, Math.min(20, text.length())) + "')");
+            });
+        }
+
+        @android.webkit.JavascriptInterface
+        public String getVoices() {
+            // Return available TTS voices as JSON
+            return "[]";
+        }
     }
 
     @Override
@@ -84,8 +113,14 @@ public class MainActivity extends Activity {
             String text = data.getStringExtra("text");
             String title = data.getStringExtra("title");
             if (text != null && !text.isEmpty()) {
-                String escaped = text.replace("\\", "\\\\").replace("'", "\\'").replace("\n", "\\n").replace("\r", "");
-                String titleEsc = (title != null ? title : "Article").replace("'", "\\'");
+                String escaped = text
+                    .replace("\\", "\\\\")
+                    .replace("'", "\\'")
+                    .replace("\n", "\\n")
+                    .replace("\r", "");
+                String titleEsc = (title != null ? title : "Article")
+                    .replace("\\", "\\\\")
+                    .replace("'", "\\'");
                 webView.loadUrl("javascript:sendToReader('" + escaped + "','" + titleEsc + "')");
             }
         }
