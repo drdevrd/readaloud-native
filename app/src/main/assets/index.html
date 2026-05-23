@@ -638,7 +638,16 @@ function switchEngine(e){
 
 /* ── DEVICE VOICES ── */
 function initDevVoices(){
-  const v=SY.getVoices();if(!v.length)return;allDevVoices=v;
+  if(!window.speechSynthesis){
+    document.getElementById('dvlist').innerHTML='<div style="color:var(--rd);font-size:13px;padding:8px;">⚠️ Speech not available on this device. Use ElevenLabs or Azure.</div>';
+    return;
+  }
+  const v=SY.getVoices();
+  if(!v||!v.length){
+    document.getElementById('dvlist').innerHTML='<div style="color:var(--t2);font-size:13px;padding:8px;">Loading voices…</div>';
+    return;
+  }
+  allDevVoices=v;
   const langs=[...new Set(v.map(x=>x.lang.split('-')[0]))].sort();
   const row=document.getElementById('langRow');row.innerHTML='';
   ['en',...langs.filter(l=>l!=='en')].forEach(l=>{
@@ -670,9 +679,9 @@ function getDevVoice(){return SY.getVoices().find(v=>v.name===selDevName)||null;
 if('onvoiceschanged' in SY){
   SY.onvoiceschanged=()=>{initDevVoices();};
 }
-// Aggressive retry — Android loads voices async
+// Aggressive retry — Android WebView loads voices very slowly
 initDevVoices();
-[200,500,1000,2000,3500].forEach(t=>setTimeout(initDevVoices,t));
+[200,500,1000,2000,3500,5000,8000].forEach(t=>setTimeout(initDevVoices,t));
 
 /* ── INPUT ── */
 function switchInput(m){
@@ -750,20 +759,22 @@ function splitChunks(text){
   return out.filter(c=>c.length>2);
 }
 function loadText(){
-  const src=inputMode==='paste'?document.getElementById('ta').value:document.getElementById('ta').value;
-  if(!src.trim()){ss('No text — paste text or fetch a URL first.');return;}
+  const src=document.getElementById('ta').value;
+  if(!src.trim()){ss('No text — paste text, fetch a URL, or use the Browser tab.');return;}
   const{text,removed}=doClean(src);
-  if(!text||text.length<30){ss('Not enough readable text.');return;}
-  chunks=splitChunks(text);ci=0;
-  const wc=text.split(/\s+/).filter(Boolean).length;
+  // If cleanup removed too much, use raw text with minimal cleaning
+  const finalText=text&&text.length>100?text:src.replace(/https?:\/\/\S+/g,'').replace(/\s{3,}/g,' ').trim();
+  if(!finalText||finalText.length<30){ss('Not enough readable text.');return;}
+  chunks=splitChunks(finalText);ci=0;
+  const wc=finalText.split(/\s+/).filter(Boolean).length;
   const totalMins=Math.round(wc/(spd*150));const timeStr=totalMins<60?totalMins+'m':Math.floor(totalMins/60)+'h '+(totalMins%60)+'m';
-  document.getElementById('pv').textContent=text;
+  document.getElementById('pv').textContent=finalText;
   document.getElementById('wc').textContent=wc.toLocaleString()+' words · ~'+timeStr+' · '+chunks.length+' sections';
   document.getElementById('rt').textContent=removed+' junk lines removed';
   document.getElementById('pc').style.display='';
   document.getElementById('playBtn').disabled=false;document.getElementById('dlBtn').disabled=false;
   LS.setItem('ra_text',src);LS.setItem('ra_total',chunks.length);
-  checkResume();ss('✓ Loaded. Tap Play.');
+  checkResume();ss('✓ Loaded '+wc.toLocaleString()+' words. Tap Play.');
 }
 function clearAll(){
   stopAll();chunks=[];ci=0;
