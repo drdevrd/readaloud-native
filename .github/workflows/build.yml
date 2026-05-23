@@ -15,8 +15,12 @@ jobs:
           distribution: 'temurin'
       - name: Setup Android SDK
         uses: android-actions/setup-android@v2
-      - name: Setup Gradle
-        uses: gradle/gradle-build-action@v2
+      - name: Install Gradle 8.1
+        run: |
+          wget -q https://services.gradle.org/distributions/gradle-8.1-bin.zip
+          unzip -q gradle-8.1-bin.zip
+          export PATH=$PWD/gradle-8.1/bin:$PATH
+          echo "$PWD/gradle-8.1/bin" >> $GITHUB_PATH
       - name: Create keystore
         run: |
           mkdir -p app
@@ -30,7 +34,7 @@ jobs:
             -dname "CN=ReadAloud, OU=Android, O=ReadAloud, L=Coimbatore, S=TN, C=IN"
       - name: Build APK
         run: |
-          gradle assembleDebug \
+          gradle-8.1/bin/gradle assembleDebug \
             -Pandroid.injected.signing.store.file=$PWD/app/readaloud.keystore \
             -Pandroid.injected.signing.store.password=android123 \
             -Pandroid.injected.signing.key.alias=readaloud \
