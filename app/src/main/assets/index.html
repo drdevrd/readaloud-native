@@ -418,24 +418,26 @@ async function brFetchExtract(url){
   sendToReader(text,title);
 }
 function sendToReader(text,title){
+  if(!text||text.trim().length<50){showToast('⚠️ Not enough text extracted');return;}
+  // Put raw text in textarea
   document.getElementById('ta').value=text;
-  const{text:cleaned,removed}=doClean(text);
-  if(cleaned&&cleaned.length>30){
-    chunks=splitChunks(cleaned);ci=0;
-    const wc=cleaned.split(/\s+/).filter(Boolean).length;
-    const totalMins=Math.round(wc/(spd*150));
-    const timeStr=totalMins<60?totalMins+'m':Math.floor(totalMins/60)+'h '+(totalMins%60)+'m';
-    document.getElementById('pv').textContent=cleaned;
-    document.getElementById('wc').textContent=wc.toLocaleString()+' words · ~'+timeStr+' · '+chunks.length+' sections';
-    document.getElementById('rt').textContent=removed+' junk lines removed';
-    document.getElementById('pc').style.display='';
-    document.getElementById('playBtn').disabled=false;
-    document.getElementById('dlBtn').disabled=false;
-    LS.setItem('ra_text',text);LS.setItem('ra_total',chunks.length);
-    updateProg();
-  }
-  showToast('✓ "'+(title||'Article').substring(0,25)+'" loaded!');
+  // Process directly — bypass strict filters for browser-extracted text
+  const cleaned=text.replace(/https?:\/\/\S+/g,'').replace(/\s{3,}/g,' ').trim();
+  chunks=splitChunks(cleaned);ci=0;
+  const wc=cleaned.split(/\s+/).filter(Boolean).length;
+  const totalMins=Math.round(wc/(spd*150));
+  const timeStr=totalMins<60?totalMins+'m':Math.floor(totalMins/60)+'h '+(totalMins%60)+'m';
+  document.getElementById('pv').textContent=cleaned.substring(0,500)+'…';
+  document.getElementById('wc').textContent=wc.toLocaleString()+' words · ~'+timeStr+' · '+chunks.length+' sections';
+  document.getElementById('rt').textContent='Extracted from browser';
+  document.getElementById('pc').style.display='';
+  document.getElementById('playBtn').disabled=false;
+  document.getElementById('dlBtn').disabled=false;
+  LS.setItem('ra_text',text);LS.setItem('ra_total',chunks.length);
+  updateProg();
+  showToast('✓ "'+(title||'Article').substring(0,25)+'" — tap Play!');
   switchPage('reader');
+  ss('✓ '+wc.toLocaleString()+' words loaded. Tap Play.');
 }
 
 function brParse(html,url){
