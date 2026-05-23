@@ -3,9 +3,9 @@ package io.github.drdevrd.readaloud;
 import android.app.Activity;
 import android.content.Intent;
 import android.os.Bundle;
-import android.view.View;
 import android.view.Window;
 import android.view.WindowManager;
+import android.webkit.JavascriptInterface;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
@@ -13,7 +13,6 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.webkit.PermissionRequest;
 import android.widget.EditText;
-import android.widget.ImageButton;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.graphics.Color;
@@ -30,15 +29,13 @@ public class BrowserActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-
         requestWindowFeature(Window.FEATURE_NO_TITLE);
         getWindow().setFlags(
             WindowManager.LayoutParams.FLAG_FULLSCREEN,
             WindowManager.LayoutParams.FLAG_FULLSCREEN
         );
-        getWindow().getDecorView().setBackgroundColor(Color.parseColor("#0a0a0f"));
 
-        // Build UI programmatically
+        // Root layout
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(Color.parseColor("#0a0a0f"));
@@ -50,24 +47,23 @@ public class BrowserActivity extends Activity {
         topBar.setPadding(dp(8), dp(8), dp(8), dp(8));
 
         // Back button
-        ImageButton backBtn = new ImageButton(this);
-        backBtn.setText("‹");
-        backBtn.setTextSize(22);
-        backBtn.setBackgroundColor(Color.parseColor("#1c1c26"));
+        TextView backBtn = new TextView(this);
+        backBtn.setText("  ‹  ");
+        backBtn.setTextSize(24);
         backBtn.setTextColor(Color.parseColor("#f0f0f4"));
-        backBtn.setPadding(dp(12), dp(8), dp(12), dp(8));
+        backBtn.setBackgroundColor(Color.parseColor("#1c1c26"));
+        backBtn.setPadding(dp(10), dp(8), dp(10), dp(8));
         backBtn.setOnClickListener(v -> { if(webView.canGoBack()) webView.goBack(); });
 
         // Address bar
         addressBar = new EditText(this);
-        addressBar.setHint("Enter URL...");
+        addressBar.setHint("Enter URL or search…");
         addressBar.setHintTextColor(Color.parseColor("#8888a0"));
         addressBar.setTextColor(Color.parseColor("#f0f0f4"));
         addressBar.setBackgroundColor(Color.parseColor("#1c1c26"));
         addressBar.setPadding(dp(12), dp(10), dp(12), dp(10));
         addressBar.setImeOptions(EditorInfo.IME_ACTION_GO);
         addressBar.setSingleLine(true);
-        addressBar.setInputType(android.text.InputType.TYPE_TEXT_VARIATION_URI | android.text.InputType.TYPE_CLASS_TEXT);
         LinearLayout.LayoutParams addrParams = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
         addrParams.setMargins(dp(6), 0, dp(6), 0);
         addressBar.setLayoutParams(addrParams);
@@ -82,10 +78,12 @@ public class BrowserActivity extends Activity {
 
         // Go button
         TextView goBtn = new TextView(this);
-        goBtn.setText("Go");
+        goBtn.setText("  Go  ");
         goBtn.setTextColor(Color.parseColor("#0a0a0f"));
         goBtn.setBackgroundColor(Color.parseColor("#6ee7b7"));
-        goBtn.setPadding(dp(16), dp(10), dp(16), dp(10));
+        goBtn.setPadding(dp(14), dp(10), dp(14), dp(10));
+        goBtn.setTextSize(14);
+        goBtn.setTypeface(null, android.graphics.Typeface.BOLD);
         goBtn.setOnClickListener(v -> { navigate(addressBar.getText().toString().trim()); hideKeyboard(); });
 
         topBar.addView(backBtn);
@@ -114,7 +112,6 @@ public class BrowserActivity extends Activity {
         statusText.setText("Browse any site");
         statusText.setTextColor(Color.parseColor("#8888a0"));
         statusText.setTextSize(11);
-        statusText.setMaxWidth(dp(120));
 
         extractBar.addView(extractBtn);
         extractBar.addView(statusText);
@@ -137,6 +134,9 @@ public class BrowserActivity extends Activity {
         settings.setMediaPlaybackRequiresUserGesture(false);
         settings.setUserAgentString("Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36");
 
+        // Add JS interface to receive extracted text
+        webView.addJavascriptInterface(new ExtractInterface(), "ExtractBridge");
+
         webView.setWebChromeClient(new WebChromeClient() {
             @Override
             public void onPermissionRequest(PermissionRequest request) {
@@ -144,8 +144,10 @@ public class BrowserActivity extends Activity {
             }
             @Override
             public void onProgressChanged(WebView view, int progress) {
-                if(progress < 100) statusText.setText("Loading " + progress + "%...");
-                else statusText.setText("✓ Tap Extract to read");
+                runOnUiThread(() -> {
+                    if(progress < 100) statusText.setText("Loading " + progress + "%");
+                    else statusText.setText("✓ Tap Extract to read");
+                });
             }
         });
 
@@ -154,13 +156,15 @@ public class BrowserActivity extends Activity {
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 String url = request.getUrl().toString();
                 view.loadUrl(url);
-                addressBar.setText(url);
+                runOnUiThread(() -> addressBar.setText(url));
                 return true;
             }
             @Override
             public void onPageFinished(WebView view, String url) {
-                addressBar.setText(url);
-                statusText.setText("✓ Tap Extract to read");
+                runOnUiThread(() -> {
+                    addressBar.setText(url);
+                    statusText.setText("✓ Tap Extract to read");
+                });
             }
         });
 
@@ -169,7 +173,6 @@ public class BrowserActivity extends Activity {
         root.addView(webView);
         setContentView(root);
 
-        // Load URL passed from MainActivity or default
         String url = getIntent().getStringExtra("url");
         if(url != null && !url.isEmpty()) {
             webView.loadUrl(url);
@@ -192,24 +195,37 @@ public class BrowserActivity extends Activity {
     }
 
     private void extractContent() {
-        statusText.setText("Extracting...");
-        // Inject JS to extract article text
-        String js = "javascript:(function(){" +
-            "var article = document.querySelector('article') || document.querySelector('[role=\"main\"]') || document.querySelector('main') || document.body;" +
-            "var clone = article.cloneNode(true);" +
-            "var remove = clone.querySelectorAll('script,style,nav,header,footer,aside,iframe,noscript,button,form,input,[class*=\"ad\"],[class*=\"sidebar\"],[class*=\"menu\"],[class*=\"cookie\"],[class*=\"popup\"],[class*=\"share\"],[class*=\"social\"]');" +
-            "for(var i=0;i<remove.length;i++) remove[i].parentNode.removeChild(remove[i]);" +
-            "var paras = clone.querySelectorAll('p');" +
-            "var text = '';" +
-            "for(var i=0;i<paras.length;i++){" +
-            "  var t = paras[i].innerText.trim();" +
-            "  if(t.length > 60) text += t + '\\n\\n';" +
-            "}" +
-            "if(text.length < 100) text = article.innerText || document.body.innerText;" +
-            "var title = document.title || '';" +
-            "window.location.href = 'readaloud://extract?title=' + encodeURIComponent(title.substring(0,100)) + '&text=' + encodeURIComponent(text.substring(0,50000));" +
-            "})()";
-        webView.loadUrl(js);
+        runOnUiThread(() -> statusText.setText("Extracting..."));
+        String js = "(function(){"
+            + "var article=document.querySelector('article')||document.querySelector('[role=\"main\"]')||document.querySelector('main')||document.body;"
+            + "var clone=article.cloneNode(true);"
+            + "var bad=clone.querySelectorAll('script,style,nav,header,footer,aside,iframe,noscript,button,form,input,[class*=\"ad\"],[class*=\"sidebar\"],[class*=\"menu\"],[class*=\"cookie\"],[class*=\"popup\"],[class*=\"share\"],[class*=\"social\"]');"
+            + "for(var i=0;i<bad.length;i++){if(bad[i].parentNode)bad[i].parentNode.removeChild(bad[i]);}"
+            + "var paras=clone.querySelectorAll('p');"
+            + "var text='';"
+            + "for(var i=0;i<paras.length;i++){var t=paras[i].innerText.trim();if(t.length>60)text+=t+'\\n\\n';}"
+            + "if(text.length<100)text=(article.innerText||document.body.innerText||'').substring(0,50000);"
+            + "var title=document.title||'';"
+            + "ExtractBridge.onExtracted(title, text.substring(0,50000));"
+            + "})()";
+        webView.evaluateJavascript(js, null);
+    }
+
+    // JS Interface — receives extracted text from page
+    private class ExtractInterface {
+        @JavascriptInterface
+        public void onExtracted(String title, String text) {
+            if(text == null || text.trim().length() < 50) {
+                runOnUiThread(() -> statusText.setText("⚠️ Could not extract text"));
+                return;
+            }
+            // Return result to MainActivity
+            Intent result = new Intent();
+            result.putExtra("title", title);
+            result.putExtra("text", text);
+            setResult(RESULT_OK, result);
+            finish();
+        }
     }
 
     @Override
@@ -224,12 +240,6 @@ public class BrowserActivity extends Activity {
     }
 
     private int dp(int value) {
-        float density = getResources().getDisplayMetrics().density;
-        return Math.round(value * density);
-    }
-
-    // Fake TextView that acts as a button
-    private static class ImageButton extends TextView {
-        public ImageButton(Context ctx) { super(ctx); }
+        return Math.round(value * getResources().getDisplayMetrics().density);
     }
 }
