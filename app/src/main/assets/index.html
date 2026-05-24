@@ -246,6 +246,9 @@ textarea:focus{border-color:var(--ac);}textarea::placeholder{color:var(--t2);}
     <div class="pre">
       <span class="pr" onclick="setSpd(.75)">.75×</span><span class="pr" onclick="setSpd(.85)">.85×</span><span class="pr" onclick="setSpd(.9)">.90×</span><span class="pr" onclick="setSpd(.95)">.95×</span><span class="pr on" onclick="setSpd(1)">1.00×</span><span class="pr" onclick="setSpd(1.1)">1.10×</span><span class="pr" onclick="setSpd(1.25)">1.25×</span><span class="pr" onclick="setSpd(1.5)">1.50×</span><span class="pr" onclick="setSpd(1.75)">1.75×</span><span class="pr" onclick="setSpd(2)">2.00×</span>
     </div>
+    <div style="margin-top:6px;">
+      <span id="spdDefBtn" onclick="setDefaultSpd()" style="font-size:11px;padding:5px 12px;border-radius:20px;border:1px solid var(--bd);background:var(--s2);color:var(--t2);cursor:pointer;">Set as Default</span>
+    </div>
   </div>
 
   <div class="ctrl-card">
@@ -560,7 +563,7 @@ function previewDevVoice(v,btnEl){
   if(previewingBtn===btnEl){previewingBtn=null;return;}
   previewingBtn=btnEl;btnEl.className='prev-btn playing';btnEl.textContent='■';
   const u=new SpeechSynthesisUtterance(DEMO_TEXT);
-  u.voice=v;u.lang=v.lang;u.rate=1;u.pitch=pitch;
+  u.voice=v;u.lang=v.lang;u.rate=spd;u.pitch=pitch;
   u.onend=()=>{btnEl.textContent='▶';btnEl.className='prev-btn';if(previewingBtn===btnEl)previewingBtn=null;};
   u.onerror=()=>{btnEl.textContent='▶';btnEl.className='prev-btn';};
   SY.speak(u);
@@ -797,13 +800,24 @@ function setSpd(v){
   document.getElementById('sd').textContent=spd.toFixed(2)+'×';
   document.getElementById('spd-lbl').textContent=spd.toFixed(2)+'×';
   document.querySelectorAll('.pr').forEach(p=>{p.className='pr'+(Math.abs(parseFloat(p.textContent)-spd)<.01?' on':'');});
-  LS.setItem('ra_spd',spd);if(mainAudio)mainAudio.playbackRate=spd;
+  LS.setItem('ra_spd',spd);
+  if(mainAudio)mainAudio.playbackRate=spd;
+  // Update default indicator
+  const def=parseFloat(LS.getItem('ra_spd_default')||'1');
+  document.getElementById('spdDefBtn').textContent=Math.abs(spd-def)<.01?'⭐ Default':'Set as Default';
 }
 function setPitch(v){
   pitch=Math.round(Math.max(.5,Math.min(2,v))*100)/100;
   document.getElementById('pd').textContent=pitch.toFixed(2);document.getElementById('ptch-lbl').textContent=pitch.toFixed(2);
   document.querySelectorAll('.pp').forEach(p=>{const pv=parseFloat(p.textContent);p.className='pp'+(Math.abs(pv-pitch)<.01?' on':'');});
   LS.setItem('ra_pitch',pitch);
+}
+function setDefaultSpd(){
+  LS.setItem('ra_spd_default',spd);
+  document.getElementById('spdDefBtn').textContent='⭐ Default';
+  document.getElementById('spdDefBtn').style.color='var(--ac)';
+  document.getElementById('spdDefBtn').style.borderColor='var(--ac)';
+  showToast('⭐ Default speed set: '+spd.toFixed(2)+'×');
 }
 function chSpd(d){setSpd(spd+d);}function chPitch(d){setPitch(pitch+d);}
 function startHS(d){chSpd(d);ht=setInterval(()=>chSpd(d),160);}
@@ -851,7 +865,7 @@ async function playMsChunk(idx){
     const r=await fetch('https://'+msRegion+'.tts.speech.microsoft.com/cognitiveservices/v1',{method:'POST',headers:{'Authorization':'Bearer '+token,'Content-Type':'application/ssml+xml','X-Microsoft-OutputFormat':'audio-24khz-48kbitrate-mono-mp3','User-Agent':'ReadAloudApp'},body:ssml});
     if(!r.ok){ss('TTS error: '+r.status);playing=false;resetUI();return;}
     const blob=await r.blob();const url=URL.createObjectURL(blob);
-    mainAudio.src=url;mainAudio.playbackRate=1;await mainAudio.play();
+    mainAudio.src=url;mainAudio.playbackRate=spd;await mainAudio.play();
     ss('▶ '+selMsName+' · '+spd.toFixed(2)+'× · '+(idx+1)+'/'+chunks.length);
     mainAudio.onended=()=>{URL.revokeObjectURL(url);if(playing&&!paused)playMsChunk(idx+1);};
     mainAudio.onerror=()=>{ss('Audio error');playing=false;resetUI();};
@@ -919,21 +933,54 @@ function onNativeVoicesReady(voices){
   if(!voices||!voices.length) return;
   allDevVoices=voices.map(v=>({name:v.name,lang:v.lang}));
   const list=document.getElementById('dvlist');list.innerHTML='';
+
+  // Load saved default
+  const savedDefault=LS.getItem('ra_dev_voice')||'';
+  if(savedDefault) selDevName=savedDefault;
+
   voices.forEach(v=>{
     const row=document.createElement('div');
-    row.className='dvbtn'+(selDevName===v.name?' on':'');
-    row.innerHTML='<div style="flex:1;cursor:pointer"><div class="dn">'+v.name+'</div><div class="dl">'+v.lang+'</div></div>';
-    row.onclick=()=>{
+    const isSelected=selDevName===v.name;
+    row.className='dvbtn'+(isSelected?' on':'');
+    row.style.display='flex';row.style.alignItems='center';row.style.gap='8px';
+    const isDefault=LS.getItem('ra_dev_voice')===v.name;
+    row.innerHTML=
+      '<div style="flex:1;cursor:pointer">'
+      +'<div class="dn">'+v.name+(isDefault?' ⭐':'')+'</div>'
+      +'<div class="dl">'+v.lang+'</div>'
+      +'</div>'
+      +'<div style="font-size:10px;padding:4px 8px;border-radius:8px;background:var(--s);border:1px solid var(--bd);color:var(--t2);cursor:pointer;white-space:nowrap;" class="set-default-btn">Set Default</div>';
+
+    row.querySelector('div[style]').onclick=()=>{
       selDevName=v.name;selDevLang=v.lang;
       document.querySelectorAll('.dvbtn').forEach(el=>el.className='dvbtn');
       row.className='dvbtn on';
       document.getElementById('dav').textContent='✓ '+v.name;
     };
+
+    row.querySelector('.set-default-btn').onclick=(e)=>{
+      e.stopPropagation();
+      selDevName=v.name;selDevLang=v.lang;
+      LS.setItem('ra_dev_voice',v.name);
+      // Refresh list to show star
+      onNativeVoicesReady(voices);
+      showToast('⭐ Default set: '+v.name);
+    };
+
     list.appendChild(row);
   });
-  // Auto-select first English voice
-  const en=voices.find(v=>v.lang.startsWith('en'))||voices[0];
-  if(en){selDevName=en.name;selDevLang=en.lang;document.getElementById('dav').textContent='✓ '+en.name;}
+
+  // Show selected
+  const sel=voices.find(v=>v.name===selDevName)||voices[0];
+  if(sel){
+    selDevName=sel.name;selDevLang=sel.lang;
+    document.getElementById('dav').textContent='✓ '+sel.name+(LS.getItem('ra_dev_voice')===sel.name?' ⭐':'');
+    // Highlight selected row
+    document.querySelectorAll('.dvbtn').forEach(el=>{
+      if(el.querySelector('.dn')&&el.querySelector('.dn').textContent.replace(' ⭐','')===sel.name)
+        el.className='dvbtn on';
+    });
+  }
 }
 function setPlayUI(){document.getElementById('pi').textContent='■';document.getElementById('pl').textContent=' Stop';['pauseBtn','backBtn','skipBtn'].forEach(id=>document.getElementById(id).disabled=false);}
 function doPause(){
@@ -1032,7 +1079,7 @@ document.addEventListener('visibilitychange',()=>{if(document.hidden&&playing){d
 window.addEventListener('load',()=>{
   loadKeys();
   const e=LS.getItem('ra_engine')||'ms';switchEngine(e);
-  setSpd(parseFloat(LS.getItem('ra_spd')||'1'));setPitch(parseFloat(LS.getItem('ra_pitch')||'1'));
+  setSpd(parseFloat(LS.getItem('ra_spd_default')||LS.getItem('ra_spd')||'1'));setPitch(parseFloat(LS.getItem('ra_pitch')||'1'));
   const savedText=LS.getItem('ra_text'),savedCi=parseInt(LS.getItem('ra_ci')||'0');
   if(savedText&&savedCi>0){
     document.getElementById('ta').value=savedText;
