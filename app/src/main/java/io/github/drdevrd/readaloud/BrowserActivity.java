@@ -3,28 +3,43 @@ package io.github.drdevrd.readaloud;
 import android.app.Activity;
 import android.content.Intent;
 import android.os.Bundle;
-import android.view.Window;
-import android.view.WindowManager;
-import android.webkit.JavascriptInterface;
-import android.webkit.WebChromeClient;
-import android.webkit.WebResourceRequest;
-import android.webkit.WebSettings;
+import android.os.Build;
+import android.os.Environment;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.webkit.WebChromeClient;
+import android.webkit.WebSettings;
 import android.webkit.PermissionRequest;
-import android.widget.EditText;
-import android.widget.LinearLayout;
-import android.widget.TextView;
+import android.webkit.JavascriptInterface;
+import android.view.Window;
+import android.view.WindowManager;
 import android.graphics.Color;
-import android.view.inputmethod.EditorInfo;
-import android.view.inputmethod.InputMethodManager;
-import android.content.Context;
+import android.speech.tts.TextToSpeech;
+import android.speech.tts.Voice;
+import android.speech.tts.UtteranceProgressListener;
+import android.widget.Toast;
+import android.Manifest;
+import android.content.pm.PackageManager;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.OutputStream;
+import java.util.Set;
+import java.util.Locale;
+import org.json.JSONArray;
+import org.json.JSONObject;
 
-public class BrowserActivity extends Activity {
+public class MainActivity extends Activity implements TextToSpeech.OnInitListener {
 
     private WebView webView;
-    private EditText addressBar;
-    private TextView statusText;
+    private TextToSpeech tts;
+    private boolean ttsReady = false;
+    private static final int BROWSER_REQUEST = 1001;
+    private static final int PERMISSION_REQUEST = 1002;
+
+    // For chunked audio saving
+    private String pendingFilename = null;
+    private OutputStream pendingOutputStream = null;
+    private android.net.Uri pendingUri = null;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -34,212 +49,225 @@ public class BrowserActivity extends Activity {
             WindowManager.LayoutParams.FLAG_FULLSCREEN,
             WindowManager.LayoutParams.FLAG_FULLSCREEN
         );
-
-        // Root layout
-        LinearLayout root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
-        root.setBackgroundColor(Color.parseColor("#0a0a0f"));
-
-        // Top bar
-        LinearLayout topBar = new LinearLayout(this);
-        topBar.setOrientation(LinearLayout.HORIZONTAL);
-        topBar.setBackgroundColor(Color.parseColor("#13131a"));
-        topBar.setPadding(dp(8), dp(8), dp(8), dp(8));
-
-        // Back button
-        TextView backBtn = new TextView(this);
-        backBtn.setText("  ‹  ");
-        backBtn.setTextSize(24);
-        backBtn.setTextColor(Color.parseColor("#f0f0f4"));
-        backBtn.setBackgroundColor(Color.parseColor("#1c1c26"));
-        backBtn.setPadding(dp(10), dp(8), dp(10), dp(8));
-        backBtn.setOnClickListener(v -> { if(webView.canGoBack()) webView.goBack(); });
-
-        // Address bar
-        addressBar = new EditText(this);
-        addressBar.setHint("Enter URL or search…");
-        addressBar.setHintTextColor(Color.parseColor("#8888a0"));
-        addressBar.setTextColor(Color.parseColor("#f0f0f4"));
-        addressBar.setBackgroundColor(Color.parseColor("#1c1c26"));
-        addressBar.setPadding(dp(12), dp(10), dp(12), dp(10));
-        addressBar.setImeOptions(EditorInfo.IME_ACTION_GO);
-        addressBar.setSingleLine(true);
-        LinearLayout.LayoutParams addrParams = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
-        addrParams.setMargins(dp(6), 0, dp(6), 0);
-        addressBar.setLayoutParams(addrParams);
-        addressBar.setOnEditorActionListener((v, actionId, event) -> {
-            if (actionId == EditorInfo.IME_ACTION_GO) {
-                navigate(addressBar.getText().toString().trim());
-                hideKeyboard();
-                return true;
-            }
-            return false;
-        });
-
-        // Go button
-        TextView goBtn = new TextView(this);
-        goBtn.setText("  Go  ");
-        goBtn.setTextColor(Color.parseColor("#0a0a0f"));
-        goBtn.setBackgroundColor(Color.parseColor("#6ee7b7"));
-        goBtn.setPadding(dp(14), dp(10), dp(14), dp(10));
-        goBtn.setTextSize(14);
-        goBtn.setTypeface(null, android.graphics.Typeface.BOLD);
-        goBtn.setOnClickListener(v -> { navigate(addressBar.getText().toString().trim()); hideKeyboard(); });
-
-        topBar.addView(backBtn);
-        topBar.addView(addressBar);
-        topBar.addView(goBtn);
-
-        // Extract bar
-        LinearLayout extractBar = new LinearLayout(this);
-        extractBar.setOrientation(LinearLayout.HORIZONTAL);
-        extractBar.setBackgroundColor(Color.parseColor("#13131a"));
-        extractBar.setPadding(dp(10), dp(6), dp(10), dp(6));
-
-        TextView extractBtn = new TextView(this);
-        extractBtn.setText("📖  Extract & Load into ReadAloud");
-        extractBtn.setTextColor(Color.parseColor("#0a0a0f"));
-        extractBtn.setBackgroundColor(Color.parseColor("#6ee7b7"));
-        extractBtn.setPadding(dp(16), dp(10), dp(16), dp(10));
-        extractBtn.setTextSize(13);
-        extractBtn.setTypeface(null, android.graphics.Typeface.BOLD);
-        LinearLayout.LayoutParams extParams = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
-        extParams.setMargins(0, 0, dp(8), 0);
-        extractBtn.setLayoutParams(extParams);
-        extractBtn.setOnClickListener(v -> extractContent());
-
-        statusText = new TextView(this);
-        statusText.setText("Browse any site");
-        statusText.setTextColor(Color.parseColor("#8888a0"));
-        statusText.setTextSize(11);
-
-        extractBar.addView(extractBtn);
-        extractBar.addView(statusText);
-
-        // WebView
+        tts = new TextToSpeech(this, this);
         webView = new WebView(this);
-        webView.setBackgroundColor(Color.WHITE);
-        LinearLayout.LayoutParams wvParams = new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f);
-        webView.setLayoutParams(wvParams);
-
-        WebSettings settings = webView.getSettings();
-        settings.setJavaScriptEnabled(true);
-        settings.setDomStorageEnabled(true);
-        settings.setLoadWithOverviewMode(true);
-        settings.setUseWideViewPort(true);
-        settings.setBuiltInZoomControls(true);
-        settings.setDisplayZoomControls(false);
-        settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
-        settings.setMediaPlaybackRequiresUserGesture(false);
-        settings.setUserAgentString("Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36");
-
-        // Add JS interface to receive extracted text
-        webView.addJavascriptInterface(new ExtractInterface(), "ExtractBridge");
-
+        webView.setBackgroundColor(Color.parseColor("#0a0a0f"));
+        setContentView(webView);
+        WebSettings s = webView.getSettings();
+        s.setJavaScriptEnabled(true);
+        s.setDomStorageEnabled(true);
+        s.setDatabaseEnabled(true);
+        s.setAllowFileAccess(true);
+        s.setAllowFileAccessFromFileURLs(true);
+        s.setAllowUniversalAccessFromFileURLs(true);
+        s.setMediaPlaybackRequiresUserGesture(false);
+        s.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
+        s.setLoadWithOverviewMode(true);
+        s.setUseWideViewPort(true);
         webView.setWebChromeClient(new WebChromeClient() {
             @Override
             public void onPermissionRequest(PermissionRequest request) {
                 request.grant(request.getResources());
             }
-            @Override
-            public void onProgressChanged(WebView view, int progress) {
-                runOnUiThread(() -> {
-                    if(progress < 100) statusText.setText("Loading " + progress + "%");
-                    else statusText.setText("✓ Tap Extract to read");
-                });
-            }
         });
-
         webView.setWebViewClient(new WebViewClient() {
             @Override
-            public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
-                String url = request.getUrl().toString();
+            public boolean shouldOverrideUrlLoading(WebView view, String url) {
+                if (url.startsWith("http://") || url.startsWith("https://")) {
+                    Intent intent = new Intent(MainActivity.this, BrowserActivity.class);
+                    intent.putExtra("url", url);
+                    startActivityForResult(intent, BROWSER_REQUEST);
+                    return true;
+                }
                 view.loadUrl(url);
-                runOnUiThread(() -> addressBar.setText(url));
                 return true;
             }
-            @Override
-            public void onPageFinished(WebView view, String url) {
-                runOnUiThread(() -> {
-                    addressBar.setText(url);
-                    statusText.setText("✓ Tap Extract to read");
-                });
-            }
         });
+        webView.addJavascriptInterface(new AppInterface(), "AndroidBridge");
+        webView.loadUrl("file:///android_asset/index.html");
+    }
 
-        root.addView(topBar);
-        root.addView(extractBar);
-        root.addView(webView);
-        setContentView(root);
-
-        String url = getIntent().getStringExtra("url");
-        if(url != null && !url.isEmpty()) {
-            webView.loadUrl(url);
-            addressBar.setText(url);
+    @Override
+    public void onInit(int status) {
+        if (status == TextToSpeech.SUCCESS) {
+            ttsReady = true;
+            tts.setLanguage(Locale.US);
+            runOnUiThread(() -> {
+                String voicesJson = getVoicesJson();
+                webView.loadUrl("javascript:onNativeVoicesReady(" + voicesJson + ")");
+            });
         }
     }
 
-    private void navigate(String input) {
-        if(input.isEmpty()) return;
-        String url;
-        if(input.startsWith("http://") || input.startsWith("https://")) {
-            url = input;
-        } else if(input.contains(".")) {
-            url = "https://" + input;
-        } else {
-            url = "https://www.google.com/search?q=" + android.net.Uri.encode(input);
-        }
-        webView.loadUrl(url);
-        addressBar.setText(url);
-    }
-
-    private void extractContent() {
-        runOnUiThread(() -> statusText.setText("Extracting..."));
-        String js = "(function(){"
-            + "var article=document.querySelector('article')||document.querySelector('[role=\"main\"]')||document.querySelector('main')||document.body;"
-            + "var clone=article.cloneNode(true);"
-            + "var bad=clone.querySelectorAll('script,style,nav,header,footer,aside,iframe,noscript,button,form,input,[class*=\"ad\"],[class*=\"sidebar\"],[class*=\"menu\"],[class*=\"cookie\"],[class*=\"popup\"],[class*=\"share\"],[class*=\"social\"]');"
-            + "for(var i=0;i<bad.length;i++){if(bad[i].parentNode)bad[i].parentNode.removeChild(bad[i]);}"
-            + "var paras=clone.querySelectorAll('p');"
-            + "var text='';"
-            + "for(var i=0;i<paras.length;i++){var t=paras[i].innerText.trim();if(t.length>60)text+=t+'\\n\\n';}"
-            + "if(text.length<100)text=(article.innerText||document.body.innerText||'').substring(0,50000);"
-            + "var title=document.title||'';"
-            + "ExtractBridge.onExtracted(title, text.substring(0,50000));"
-            + "})()";
-        webView.evaluateJavascript(js, null);
-    }
-
-    // JS Interface — receives extracted text from page
-    private class ExtractInterface {
-        @JavascriptInterface
-        public void onExtracted(String title, String text) {
-            if(text == null || text.trim().length() < 50) {
-                runOnUiThread(() -> statusText.setText("⚠️ Could not extract text"));
-                return;
+    private String getVoicesJson() {
+        JSONArray arr = new JSONArray();
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                Set<Voice> voices = tts.getVoices();
+                if (voices != null) {
+                    for (Voice v : voices) {
+                        if (!v.isNetworkConnectionRequired()) {
+                            JSONObject obj = new JSONObject();
+                            obj.put("name", v.getName());
+                            obj.put("lang", v.getLocale().toLanguageTag());
+                            arr.put(obj);
+                        }
+                    }
+                }
             }
-            // Return result to MainActivity
-            Intent result = new Intent();
-            result.putExtra("title", title);
-            result.putExtra("text", text);
-            setResult(RESULT_OK, result);
-            finish();
+            if (arr.length() == 0) {
+                JSONObject obj = new JSONObject();
+                obj.put("name", "Default");
+                obj.put("lang", "en-US");
+                arr.put(obj);
+            }
+        } catch (Exception e) {}
+        return arr.toString();
+    }
+
+    private class AppInterface {
+        @JavascriptInterface
+        public void openBrowser(String url) {
+            runOnUiThread(() -> {
+                Intent intent = new Intent(MainActivity.this, BrowserActivity.class);
+                intent.putExtra("url", url != null ? url : "https://www.britannica.com");
+                startActivityForResult(intent, BROWSER_REQUEST);
+            });
+        }
+
+        @JavascriptInterface
+        public void speakText(String text, String voiceName, float rate, float pitch) {
+            if (!ttsReady) return;
+            runOnUiThread(() -> {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP && voiceName != null && !voiceName.isEmpty()) {
+                    Set<Voice> voices = tts.getVoices();
+                    if (voices != null) {
+                        for (Voice v : voices) {
+                            if (v.getName().equals(voiceName)) { tts.setVoice(v); break; }
+                        }
+                    }
+                }
+                tts.setSpeechRate(rate);
+                tts.setPitch(pitch);
+                String uttId = "RA_" + System.currentTimeMillis();
+                tts.setOnUtteranceProgressListener(new UtteranceProgressListener() {
+                    @Override public void onStart(String id) {}
+                    @Override public void onDone(String id) {
+                        runOnUiThread(() -> webView.loadUrl("javascript:onNativeTTSDone()"));
+                    }
+                    @Override public void onError(String id) {
+                        runOnUiThread(() -> webView.loadUrl("javascript:onNativeTTSError()"));
+                    }
+                });
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                    tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, uttId);
+                } else {
+                    tts.speak(text, TextToSpeech.QUEUE_FLUSH, null);
+                }
+            });
+        }
+
+        @JavascriptInterface
+        public void stopSpeaking() {
+            runOnUiThread(() -> { if (ttsReady) tts.stop(); });
+        }
+
+        // Called once to start a new audio file
+        @JavascriptInterface
+        public void startAudioFile(String filename) {
+            runOnUiThread(() -> {
+                try {
+                    pendingFilename = filename;
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        android.content.ContentValues values = new android.content.ContentValues();
+                        values.put(android.provider.MediaStore.Downloads.DISPLAY_NAME, filename);
+                        values.put(android.provider.MediaStore.Downloads.MIME_TYPE, "audio/mpeg");
+                        values.put(android.provider.MediaStore.Downloads.IS_PENDING, 1);
+                        pendingUri = getContentResolver().insert(
+                            android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
+                        if (pendingUri != null) {
+                            pendingOutputStream = getContentResolver().openOutputStream(pendingUri);
+                        }
+                    } else {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
+                            checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+                            requestPermissions(new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE}, PERMISSION_REQUEST);
+                            return;
+                        }
+                        File dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
+                        if (!dir.exists()) dir.mkdirs();
+                        File file = new File(dir, filename);
+                        pendingOutputStream = new FileOutputStream(file);
+                    }
+                } catch (Exception e) {
+                    Toast.makeText(MainActivity.this, "Error starting file: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+                }
+            });
+        }
+
+        // Called for each audio chunk
+        @JavascriptInterface
+        public void appendAudioChunk(String base64Data) {
+            try {
+                if (pendingOutputStream != null && base64Data != null && !base64Data.isEmpty()) {
+                    byte[] data = android.util.Base64.decode(base64Data, android.util.Base64.DEFAULT);
+                    pendingOutputStream.write(data);
+                }
+            } catch (Exception e) {}
+        }
+
+        // Called when all chunks sent
+        @JavascriptInterface
+        public void finishAudioFile() {
+            runOnUiThread(() -> {
+                try {
+                    if (pendingOutputStream != null) {
+                        pendingOutputStream.flush();
+                        pendingOutputStream.close();
+                        pendingOutputStream = null;
+                    }
+                    if (pendingUri != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        android.content.ContentValues values = new android.content.ContentValues();
+                        values.put(android.provider.MediaStore.Downloads.IS_PENDING, 0);
+                        getContentResolver().update(pendingUri, values, null, null);
+                        pendingUri = null;
+                    }
+                    Toast.makeText(MainActivity.this, "✓ Saved to Downloads: " + pendingFilename, Toast.LENGTH_LONG).show();
+                    webView.loadUrl("javascript:ss('✓ Saved to Downloads: " + pendingFilename + "')");
+                } catch (Exception e) {
+                    Toast.makeText(MainActivity.this, "Save error: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                }
+                pendingFilename = null;
+            });
+        }
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == BROWSER_REQUEST && resultCode == RESULT_OK && data != null) {
+            String text = data.getStringExtra("text");
+            String title = data.getStringExtra("title");
+            if (text != null && !text.isEmpty()) {
+                String escaped = text.replace("\\","\\\\").replace("'","\\'").replace("\n","\\n").replace("\r","");
+                String titleEsc = (title != null ? title : "Article").replace("'","\\'");
+                webView.loadUrl("javascript:sendToReader('" + escaped + "','" + titleEsc + "')");
+            }
         }
     }
 
     @Override
     public void onBackPressed() {
-        if(webView.canGoBack()) webView.goBack();
-        else finish();
+        if (webView.canGoBack()) webView.goBack();
+        else super.onBackPressed();
     }
 
-    private void hideKeyboard() {
-        InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
-        if(imm != null) imm.hideSoftInputFromWindow(addressBar.getWindowToken(), 0);
+    @Override
+    protected void onDestroy() {
+        if (tts != null) { tts.stop(); tts.shutdown(); }
+        super.onDestroy();
     }
 
-    private int dp(int value) {
-        return Math.round(value * getResources().getDisplayMetrics().density);
-    }
+    @Override protected void onPause() { super.onPause(); webView.onPause(); }
+    @Override protected void onResume() { super.onResume(); webView.onResume(); }
 }
