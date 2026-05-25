@@ -354,6 +354,7 @@ function switchPage(p){
     const bp=document.getElementById('page-browser');
     bp.style.height='100vh';bp.style.overflow='hidden';
   }
+  LS.setItem('ra_page',p);
 }
 
 /* ── REAL IFRAME BROWSER ── */
@@ -376,8 +377,7 @@ function brLoad(url){
   // Fallback: iframe for web/PC
   document.getElementById('brHome').style.display='none';
   const wv=document.getElementById('webview');
-  wv.style.display='block';
-  wv.style.flex='1';
+  wv.style.display='block';wv.style.flex='1';
   wv.src=url;
   document.getElementById('brStatus').textContent='Loading…';
   wv.onload=()=>{
@@ -1102,6 +1102,7 @@ window.addEventListener('load',()=>{
   loadKeys();
   const e=LS.getItem('ra_engine')||'ms';switchEngine(e);
   setSpd(parseFloat(LS.getItem('ra_spd_default')||LS.getItem('ra_spd')||'1'));setPitch(parseFloat(LS.getItem('ra_pitch')||'1'));
+  const lastPage=LS.getItem('ra_page')||'reader';switchPage(lastPage);
   const savedText=LS.getItem('ra_text'),savedCi=parseInt(LS.getItem('ra_ci')||'0');
   if(savedText&&savedCi>0){
     document.getElementById('ta').value=savedText;
