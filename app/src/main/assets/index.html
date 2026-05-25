@@ -802,9 +802,14 @@ function setSpd(v){
   document.querySelectorAll('.pr').forEach(p=>{p.className='pr'+(Math.abs(parseFloat(p.textContent)-spd)<.01?' on':'');});
   LS.setItem('ra_spd',spd);
   if(mainAudio)mainAudio.playbackRate=spd;
-  // Update default indicator
-  const def=parseFloat(LS.getItem('ra_spd_default')||'1');
-  document.getElementById('spdDefBtn').textContent=Math.abs(spd-def)<.01?'⭐ Default':'Set as Default';
+  const defBtn=document.getElementById('spdDefBtn');
+  if(defBtn){
+    const def=parseFloat(LS.getItem('ra_spd_default')||'1');
+    const isDefault=Math.abs(spd-def)<.01;
+    defBtn.textContent=isDefault?'⭐ Default':'Set as Default';
+    defBtn.style.color=isDefault?'var(--ac)':'var(--t2)';
+    defBtn.style.borderColor=isDefault?'var(--ac)':'var(--bd)';
+  }
 }
 function setPitch(v){
   pitch=Math.round(Math.max(.5,Math.min(2,v))*100)/100;
@@ -1049,26 +1054,43 @@ async function downloadAudio(){
     }catch(e){continue;}
   }
   if(!blobs.length){btn.disabled=false;btn.innerHTML='⬇ Download Full Audio (MP3)';ss('Download failed');return;}
-  const merged=new Blob(blobs,{type:'audio/mpeg'});
+
   const filename='readaloud_'+(new Date().toISOString().slice(0,10))+'.mp3';
-  // Android native save via AndroidBridge
+
   if(window.AndroidBridge){
-    const reader=new FileReader();
-    reader.onload=()=>{
-      const base64=reader.result.split(',')[1];
-      window.AndroidBridge.saveAudioFile(base64, filename);
-    };
-    reader.readAsDataURL(merged);
+    // Send each chunk separately to avoid JavascriptInterface size limit
+    btn.innerHTML='<span class="spin"></span>Saving…';
+    try{
+      // Start new file
+      window.AndroidBridge.startAudioFile(filename);
+      for(let i=0;i<blobs.length;i++){
+        const b64=await blobToBase64(blobs[i]);
+        window.AndroidBridge.appendAudioChunk(b64);
+      }
+      window.AndroidBridge.finishAudioFile();
+    }catch(e){
+      ss('Save error: '+e.message);
+    }
   } else {
-    // Web browser download
+    const merged=new Blob(blobs,{type:'audio/mpeg'});
     const url=URL.createObjectURL(merged);
     const a=document.createElement('a');
     a.href=url;a.download=filename;a.style.display='none';
     document.body.appendChild(a);a.click();document.body.removeChild(a);
     setTimeout(()=>URL.revokeObjectURL(url),5000);
+    ss('✓ Downloaded — check Downloads folder');
   }
   btn.disabled=false;btn.innerHTML='⬇ Download Full Audio (MP3)';
-  ss('✓ Audio ready — check Downloads or Files app');
+}
+
+function blobToBase64(blob){
+  return new Promise((resolve,reject)=>{
+    const reader=new FileReader();
+    reader.onload=()=>resolve(reader.result.split(',')[1]);
+    reader.onerror=reject;
+    reader.readAsDataURL(blob);
+  });
+}  ss('✓ Audio ready — check Downloads or Files app');
 }
 
 /* ── TOAST ── */
